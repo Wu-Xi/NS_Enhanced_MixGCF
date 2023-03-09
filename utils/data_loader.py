@@ -30,12 +30,16 @@ def read_cf_yelp2018(file_name):
     return np.array(inter_mat)
 
 
+def read_ifashion(file_name):
+    return np.loadtxt(file_name, dtype=np.int64)  # [u_id, i_id]
+
+
 def statistics(train_data, valid_data, test_data):
     global n_users, n_items
     n_users = max(max(train_data[:, 0]), max(valid_data[:, 0]), max(test_data[:, 0])) + 1
     n_items = max(max(train_data[:, 1]), max(valid_data[:, 1]), max(test_data[:, 1])) + 1
 
-    if dataset != 'yelp2018':
+    if args.dataset not in ['yelp2018', 'ifashion','gowalla']:
         n_items -= n_users
         # remap [n_users, n_users+n_items] to [0, n_items]
         train_data[:, 1] -= n_users
@@ -93,15 +97,17 @@ def load_data(model_args):
     dataset = args.dataset
     directory = args.data_path + dataset + '/'
 
-    if dataset == 'yelp2018':
+    if dataset == 'yelp2018' or dataset == 'gowalla':
         read_cf = read_cf_yelp2018
+    elif dataset=="ifashion":
+        read_cf = read_ifashion
     else:
         read_cf = read_cf_amazon
 
     print('reading train and test user-item set ...')
     train_cf = read_cf(directory + 'train.txt')
     test_cf = read_cf(directory + 'test.txt')
-    if args.dataset != 'yelp2018':
+    if args.dataset not in ['yelp2018', 'ifashion','gowalla']:
         valid_cf = read_cf(directory + 'valid.txt')
     else:
         valid_cf = test_cf
@@ -116,10 +122,9 @@ def load_data(model_args):
     }
     user_dict = {
         'train_user_set': train_user_set,
-        'valid_user_set': valid_user_set if args.dataset != 'yelp2018' else None,
+        'valid_user_set': valid_user_set if args.dataset not in ['yelp2018', 'ifashion','gowalla'] else None,
         'test_user_set': test_user_set,
     }
 
     print('loading over ...')
     return train_cf, user_dict, n_params, norm_mat
-

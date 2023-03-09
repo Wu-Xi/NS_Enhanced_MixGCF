@@ -1,11 +1,9 @@
 '''
-Created on October 1, 2020
-
-@author: Tinglin Huang (huangtinglin@outlook.com)
+mutil_sample and Adaptive weights
 '''
 import torch
 import torch.nn as nn
-
+import pdb
 
 class GraphConv(nn.Module):
     """
@@ -46,7 +44,7 @@ class GraphConv(nn.Module):
         # all_embed: [n_users+n_items, channel]
         all_embed = torch.cat([user_embed, item_embed], dim=0)
         agg_embed = all_embed
-        embs = [all_embed]
+        embs = []
 
         for hop in range(self.n_hops):
             interact_mat = self._sparse_dropout(self.interact_mat,
@@ -82,6 +80,10 @@ class LightGCN(nn.Module):
         self.ns = args_config.ns
         self.K = args_config.K
 
+        self.th = args_config.th
+
+        self.last_epoch=0
+
         self.device = torch.device("cuda:0") if args_config.cuda else torch.device("cpu")
 
         self._init_weight()
@@ -111,7 +113,7 @@ class LightGCN(nn.Module):
         v = torch.from_numpy(coo.data).float()
         return torch.sparse.FloatTensor(i, v, coo.shape)
 
-    def forward(self, batch=None):
+    def forward(self, batch=None,epoch=0):
         user = batch['users']
         pos_item = batch['pos_items']
         neg_item = batch['neg_items']  # [batch_size, n_negs * K]
@@ -130,12 +132,12 @@ class LightGCN(nn.Module):
             for k in range(self.K):
                 neg_gcn_embs.append(self.negative_sampling(user_gcn_emb, item_gcn_emb,
                                                            user, neg_item[:, k*self.n_negs: (k+1)*self.n_negs],
-                                                           pos_item))
+                                                           pos_item,epoch))
             neg_gcn_embs = torch.stack(neg_gcn_embs, dim=1)
 
         return self.create_bpr_loss(user_gcn_emb[user], item_gcn_emb[pos_item], neg_gcn_embs)
 
-    def negative_sampling(self, user_gcn_emb, item_gcn_emb, user, neg_candidates, pos_item):
+    def negative_sampling(self, user_gcn_emb, item_gcn_emb, user, neg_candidates, pos_item,epoch):
         batch_size = user.shape[0]
         s_e, p_e = user_gcn_emb[user], item_gcn_emb[pos_item]  # [batch_size, n_hops+1, channel]
         if self.pool != 'concat':
@@ -144,15 +146,41 @@ class LightGCN(nn.Module):
         """positive mixing"""
         seed = torch.rand(batch_size, 1, p_e.shape[1], 1).to(p_e.device)  # (0, 1)
         n_e = item_gcn_emb[neg_candidates]  # [batch_size, n_negs, n_hops, channel]
-        n_e_ = seed * p_e.unsqueeze(dim=1) + (1 - seed) * n_e  # mixing
 
-        """hop mixing"""
-        scores = (s_e.unsqueeze(dim=1) * n_e_).sum(dim=-1)  # [batch_size, n_negs, n_hops+1]
-        indices = torch.max(scores, dim=1)[1].detach()
-        neg_items_emb_ = n_e_.permute([0, 2, 1, 3])  # [batch_size, n_hops+1, n_negs, channel]
-        # [batch_size, n_hops+1, channel]
-        return neg_items_emb_[[[i] for i in range(batch_size)],
-                              range(neg_items_emb_.shape[1]), indices, :]
+        """mutil-negative mixing"""
+        scores_neg = (s_e.unsqueeze(dim=1) * n_e).sum(dim=-1) # [batch_size, n_negs, n_hops]
+
+        # scores_neg_ = scores_neg.sum(dim=1)  # [batch_size, n_hops]
+        scores_pos_ = (s_e*p_e).sum(dim=-1) # [batch_size, n_hops]
+
+        total_scores = torch.exp(scores_neg).sum(dim=1) + torch.exp(scores_pos_)# [batch_size, n_hops]
+        total_scores = total_scores.unsqueeze(dim=1)
+
+        scores_neg = torch.exp(scores_neg)/total_scores  # [batch_size, n_negs, n_hops]
+
+        scores_neg[scores_neg[:,:,:]<self.th]=0
+
+        # if not self.last_epoch==epoch:
+        #     with open("./weighted_neg_th0.01.log" ,mode="a+",encoding="UTF-8")as file:
+        #         file.write(str(epoch)+"\n")
+        #         file.write(str(scores_neg[0])+"\n")
+        #         self.last_epoch=epoch
+
+        weighted_n_e = scores_neg.unsqueeze(dim=-1)*n_e #[batch_size, n_negs, n_hops, channel]
+
+        weighted_pos_e = (1-scores_neg.sum(dim=1)).unsqueeze(dim=-1)
+        weighted_n_e = weighted_n_e.sum(dim=1)+weighted_pos_e*p_e
+
+
+        if not self.last_epoch==epoch:
+            with open("./weighted_pos_neg_th001.log" ,mode="a+",encoding="UTF-8")as file:
+                file.write(str(epoch)+"\n")
+                file.write(str(scores_neg[0])+"\n")
+                file.write(str(weighted_pos_e[0])+"\n")
+                self.last_epoch=epoch
+            
+        return weighted_n_e
+
 
     def pooling(self, embeddings):
         # [-1, n_hops, channel]
@@ -175,7 +203,6 @@ class LightGCN(nn.Module):
             return user_gcn_emb, item_gcn_emb
         else:
             return torch.cat([user_gcn_emb, item_gcn_emb], dim=0)
-
     def rating(self, u_g_embeddings=None, i_g_embeddings=None):
         return torch.matmul(u_g_embeddings, i_g_embeddings.t())
 
@@ -196,9 +223,9 @@ class LightGCN(nn.Module):
         mf_loss = torch.mean(torch.log(1+torch.exp(neg_scores - pos_scores.unsqueeze(dim=1)).sum(dim=1)))
 
         # cul regularizer
-        regularize = (torch.norm(user_gcn_emb[:, 0, :]) ** 2
-                       + torch.norm(pos_gcn_embs[:, 0, :]) ** 2
-                       + torch.norm(neg_gcn_embs[:, :, 0, :]) ** 2) / 2  # take hop=0
+        regularize = (torch.norm(user_gcn_emb[:, 2, :]) ** 2
+                       + torch.norm(pos_gcn_embs[:, 2, :]) ** 2
+                       + torch.norm(neg_gcn_embs[:, :, 2, :]) ** 2) / 2  # take hop=0
         emb_loss = self.decay * regularize / batch_size
 
         return mf_loss + emb_loss, mf_loss, emb_loss

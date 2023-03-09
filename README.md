@@ -60,12 +60,19 @@ python main.py --dataset amazon --gnn lightgcn --dim 64 --lr 0.001 --batch_size 
 
 #####  MixGCF
 
+新实验专用参数设置
+
 ```
-python main.py --dataset ali --dim 64 --lr 0.001 --batch_size 2048 --gpu_id 0 --context_hops 3 --pool mean --ns mixgcf --K 1 --n_negs 32
+nohup python main.py --dataset ali --lr 0.001 --batch_size 2048 --gpu_id 4 --n_negs 32 --alpha 2  >0307_ali_alpha_2_hop012.log
 
-python main.py --dataset yelp2018 --dim 64 --lr 0.001 --batch_size 2048 --gpu_id 0 --context_hops 3 --pool mean --ns mixgcf --K 1 --n_negs 64
+nohup python main.py --dataset yelp2018 --lr 0.001 --batch_size 2048 --gpu_id 4 --n_negs 64 --alpha 0  >0307_yelp_alpa_0_hop012.log
 
-python main.py --dataset amazon --dim 64 --lr 0.001 --batch_size 2048 --gpu_id 0 --context_hops 3 --pool mean --ns mixgcf --K 1 --n_negs 16
+nohup python main.py --dataset amazon --lr 0.001 --batch_size 2048 --gpu_id 2 --n_negs 16 --alpha 2  >0307amazon_alpha_2_hop012.log
+
+nohup python main.py --dataset gowalla --lr 0.001 --batch_size 2048 --gpu_id 3 --n_negs 16 --alpha 0.5 --neg_mix_num 1 >0228_gowalla_negitem_1_hop012.log
+
+nohup python main.py --dataset ifashion --lr 0.001 --batch_size 2048 --gpu_id 2 --n_negs 16
+
 ```
 
 #### NGCF

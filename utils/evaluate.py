@@ -9,7 +9,8 @@ import multiprocessing
 import heapq
 from time import time
 
-cores = multiprocessing.cpu_count() // 2
+# cores = multiprocessing.cpu_count() // 2    # 46
+cores = multiprocessing.cpu_count() // 8    # 23
 
 args = parse_args()
 Ks = eval(args.Ks)

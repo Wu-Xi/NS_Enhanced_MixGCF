@@ -9,11 +9,13 @@ from tqdm import tqdm
 from copy import deepcopy
 import logging
 from prettytable import PrettyTable
-
+import pdb
 from utils.parser import parse_args
 from utils.data_loader import load_data
 from utils.evaluate import test
 from utils.helper import early_stopping
+
+import pdb
 
 n_users = 0
 n_items = 0
@@ -58,6 +60,7 @@ if __name__ == '__main__':
     """read args"""
     global args, device
     args = parse_args()
+    print(args)
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu_id)
     device = torch.device("cuda:0") if args.cuda else torch.device("cpu")
 
@@ -72,7 +75,7 @@ if __name__ == '__main__':
     K = args.K
 
     """define model"""
-    from modules.LightGCN import LightGCN
+    from modules.LightGCN_hardest_softmax_alpha_enhanced import LightGCN
     from modules.NGCF import NGCF
     if args.gnn == 'lightgcn':
         model = LightGCN(n_params, args, norm_mat).to(device)
@@ -87,6 +90,7 @@ if __name__ == '__main__':
     should_stop = False
 
     print("start training ...")
+  
     for epoch in range(args.epoch):
         # shuffle training data
         train_cf_ = train_cf
@@ -99,24 +103,34 @@ if __name__ == '__main__':
         loss, s = 0, 0
         hits = 0
         train_s_t = time()
+
+        user_grad,item_grad,all_gard=0,0,0
         while s + args.batch_size <= len(train_cf):
-            batch = get_feed_dict(train_cf_,
-                                  user_dict['train_user_set'],
-                                  s, s + args.batch_size,
-                                  n_negs)
-
-            batch_loss, _, _ = model(batch)
-
+            batch = get_feed_dict(train_cf_ , user_dict['train_user_set'], s , s + args.batch_size, n_negs)
+            batch_loss, BPR_loss,reg_loss = model(batch,epoch)
             optimizer.zero_grad()
+            if s%2000==0:
+                print("epoch:",epoch,"s:",s,"batch_loss",batch_loss.item(),"BPR_loss",BPR_loss.item(),"reg_loss",reg_loss.item())
+            
             batch_loss.backward()
+            # pdb.set_trace()
+            # user_grad+=model.user_embed.grad.sum(dim=0)
+            # item_grad+=model.item_embed.grad.sum(dim=0)
+            # all_gard+=(user_grad+item_grad)
+
             optimizer.step()
 
             loss += batch_loss
             s += args.batch_size
+        
+        # torch.save()
+
+        
+
+
 
         train_e_t = time()
-
-        if epoch % 5 == 0:
+        if epoch % 1 == 0:
             """testing"""
 
             train_res = PrettyTable()
